@@ -1,0 +1,82 @@
+// GET /api/exams - returns list of exams (id, title)
+// POST /api/exams - teacher creates an exam with a title (requires x-teacher-password)
+
+import { neon } from '@neondatabase/serverless';
+
+export const config = {
+  runtime: 'edge',
+};
+
+export default async function handler(req) {
+  try {
+    const sql = neon(process.env.POSTGRES_URL);
+
+    // GET: returns list of exams (id, title) for students
+    if (req.method === 'GET') {
+      const rows = await sql`
+        SELECT id, title
+        FROM exams
+        ORDER BY created_at DESC, id ASC
+      `;
+      return new Response(JSON.stringify({ exams: rows }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+
+    // POST: teacher creates an exam with a title
+    if (req.method === 'POST') {
+      if (!process.env.TEACHER_PASSWORD) {
+        return new Response(
+          JSON.stringify({ error: 'TEACHER_PASSWORD not configured' }),
+          {
+            status: 503,
+            headers: { 'content-type': 'application/json' },
+          }
+        );
+      }
+
+      const pass = req.headers.get('x-teacher-password');
+      if (pass !== process.env.TEACHER_PASSWORD) {
+        return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+          status: 401,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+
+      const body = await req.json();
+      const title = (body?.title || '').trim();
+
+      if (!title) {
+        return new Response(JSON.stringify({ error: 'Title is required' }), {
+          status: 400,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+
+      const rows = await sql`
+        INSERT INTO exams (title)
+        VALUES (${title})
+        RETURNING id, title, pdf_url, created_at
+      `;
+
+      return new Response(JSON.stringify({ exam: rows[0] }), {
+        status: 201,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+
+    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
+      status: 405,
+      headers: { 'content-type': 'application/json' },
+    });
+  } catch (error) {
+    return new Response(
+      JSON.stringify({ error: 'Server error', detail: String(error?.message || error) }),
+      {
+        status: 500,
+        headers: { 'content-type': 'application/json' },
+      }
+    );
+  }
+}

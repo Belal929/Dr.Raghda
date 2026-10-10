@@ -2186,6 +2186,11 @@
               ${LKEYS.map((L) => `<button type="button" class="chip t-${LESSONS[L].tone}" data-l="${L}" aria-pressed="${me.lessons.includes(L)}"><span class="dot d-${LESSONS[L].tone}"></span><span><span class="code">${LESSONS[L].code}</span><br>${esc(LESSONS[L].name)}</span></button>`).join("")}
             </div>
           </div>
+          <div class="field"><span class="label">Online Exams</span>
+            <div class="chips" id="examChips">
+              <p class="muted" style="margin:0;font-size:14px">Loading exams...</p>
+            </div>
+          </div>
           <div class="field"><span class="label">Number of questions</span>
             <div class="chips" id="lenChips">
               ${[10, 20, 30, "all"].map((n) => `<button type="button" class="chip" data-n="${n}" aria-pressed="${String(me.len) === String(n)}">${n === "all" ? "All selected" : n}</button>`).join("")}
@@ -2241,6 +2246,38 @@
               ? `${n} questions available in ${sel.length} lesson${sel.length > 1 ? "s" : ""}.`
               : "Pick at least one lesson.";
           }
+          // Load exams from API
+          (async () => {
+            try {
+              const res = await fetch("/api/exams");
+              const data = await res.json();
+              const examChips = $("#examChips");
+              if (examChips && data.exams && data.exams.length) {
+                examChips.innerHTML = data.exams
+                  .map(
+                    (e) =>
+                      `<button type="button" class="chip" data-exam-id="${e.id}" data-exam-title="${esc(e.title)}" aria-pressed="false"><span>${esc(e.title)}</span></button>`
+                  )
+                  .join("");
+                examChips.querySelectorAll("[data-exam-id]").forEach((b) => {
+                  b.onclick = () => {
+                    b.setAttribute(
+                      "aria-pressed",
+                      b.getAttribute("aria-pressed") !== "true"
+                    );
+                    info();
+                  };
+                });
+              } else if (examChips) {
+                examChips.innerHTML = '<p class="muted" style="margin:0;font-size:14px">No exams available. Add exams from Teacher Dashboard.</p>';
+              }
+            } catch (e) {
+              const examChips = $("#examChips");
+              if (examChips) {
+                examChips.innerHTML = '<p class="muted" style="margin:0;font-size:14px">Failed to load exams</p>';
+              }
+            }
+          })();
           chips.addEventListener("click", (e) => {
             const b = e.target.closest("[data-l]");
             if (!b) return;
@@ -2873,6 +2910,46 @@
           };
         }
 
+        async function renderNewExam() {
+          $("#app").innerHTML = `
+    <section class="view wide">
+      <div class="row" style="justify-content:space-between;align-items:flex-end;gap:12px">
+        <div><p class="label">Teacher Mode</p><h2 style="font-size:30px;margin:0">Create New Exam</h2></div>
+        <div class="row" style="gap:8px"><button class="btn ghost small" id="backDash">Dashboard</button></div>
+      </div>
+      <div class="card stack" style="margin-top:16px">
+        <label class="field"><span class="label">Exam Title</span><input id="examTitle" placeholder="e.g. Unit 5 Quiz" maxlength="200"></label>
+        <button class="btn small" id="createExamBtn" style="align-self:start">Create Exam</button>
+        <div id="newExamMsg" class="muted"></div>
+      </div>
+    </section>`;
+          $("#backDash").onclick = renderTeacher;
+          $("#createExamBtn").onclick = async () => {
+            const title = $("#examTitle").value.trim();
+            if (!title) {
+              $("#newExamMsg").textContent = "Please enter exam title";
+              return;
+            }
+            $("#newExamMsg").textContent = "Creating exam...";
+            try {
+              const res = await fetch("/api/exams", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ title }),
+              });
+              const data = await res.json();
+              if (res.ok) {
+                $("#newExamMsg").innerHTML = `Exam created! ID: <strong>${data.exam.id}</strong>. Now go to <strong>Question Bank</strong> or manage it.`;
+                toast("Exam created successfully");
+              } else {
+                $("#newExamMsg").textContent = data.error || "Failed to create exam";
+              }
+            } catch (e) {
+              $("#newExamMsg").textContent = "Error creating exam";
+            }
+          };
+        }
+
         function renderQuestionBank() {
           const lessons = Object.entries(LESSONS);
           const rows = BANK.slice().sort(
@@ -3107,11 +3184,12 @@
   <section class="view stack">
     <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:end">
       <div><p class="label">Teacher dashboard · Unit 5</p><h2 style="font-size:30px">Dr. Raghda's class results</h2></div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn small" id="xls" ${view.length ? "" : "disabled"}>Download Excel</button>
-        <button class="btn small" id="questionBankBtn">Question Bank</button><button class="btn ghost small" id="refresh">Refresh</button>
-        <button class="btn ghost small" id="logout">Lock</button>
-      </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn small" id="xls" ${view.length ? "" : "disabled"}>Download Excel</button>
+          <button class="btn small" id="newExamBtn">Add New Exam</button>
+          <button class="btn small" id="questionBankBtn">Question Bank</button><button class="btn ghost small" id="refresh">Refresh</button>
+          <button class="btn ghost small" id="logout">Lock</button>
+        </div>
     </div>
     ${Store.mode === "local" ? `<p class="notice" style="margin:0">Demo mode: the online database is not connected yet, so you only see results played on this device. After you connect Upstash Redis on Vercel, every student's result appears here.</p>` : ""}
     <div class="kpis">
@@ -3200,6 +3278,8 @@
               }),
           );
           $("#questionBankBtn").onclick = renderQuestionBank;
+          const newExamBtn = $("#newExamBtn");
+          if (newExamBtn) newExamBtn.onclick = renderNewExam;
           $("#refresh").onclick = renderTeacher;
           $("#logout").onclick = () => {
             teacherPass = "";
